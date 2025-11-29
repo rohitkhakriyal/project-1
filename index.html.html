@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CampusConfess V1</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Icons -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Alpine.js -->
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+
+  <!-- Firebase SDKs (compat, easier for HTML page) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    }
+  </style>
+
+  <script>
+    let db = null;
+    let auth = null;
+
+    function initFirebase() {
+      // TODO: 🔥 Replace this with YOUR Firebase config from console
+      const firebaseConfig = {
+  apiKey: "AIzaSyA6X7bvcXgPO0BA7W6Y2B72dc4F_JPfzDU",
+  authDomain: "campusconnect-7a0ad.firebaseapp.com",
+  projectId: "campusconnect-7a0ad",
+  storageBucket: "campusconnect-7a0ad.firebasestorage.app",
+  messagingSenderId: "580311522122",
+  appId: "1:580311522122:web:ee5c3ac7cfcf30f51c7fb3",
+  measurementId: "G-7V3K1SQYMJ"
+};
+
+      const app = firebase.initializeApp(firebaseConfig);
+      auth = firebase.auth();
+      db = firebase.firestore();
+      console.log("🔥 Firebase initialized", app.options.projectId);
+    }
+
+    function app() {
+      return {
+        currentUser: null,
+        authLoading: true,
+        confessions: [],
+        newConfessionText: "",
+
+        // Listen for login / logout
+        initAuthListener() {
+          if (!auth) return;
+          auth.onAuthStateChanged(user => {
+            this.authLoading = false;
+            if (user) {
+              this.currentUser = {
+                uid: user.uid,
+                name: user.displayName || "Student",
+                email: user.email
+              };
+            } else {
+              this.currentUser = null;
+            }
+          });
+        },
+
+        async loginWithGoogle() {
+          if (!auth) {
+            alert("Auth not ready yet. Try again in a second.");
+            return;
+          }
+          const provider = new firebase.auth.GoogleAuthProvider();
+          try {
+            await auth.signInWithPopup(provider);
+          } catch (err) {
+            console.error(err);
+            alert("Login failed: " + err.message);
+          }
+        },
+
+        async logout() {
+          if (!auth) return;
+          await auth.signOut();
+        },
+
+        // Load confessions from Firestore
+        async loadConfessions() {
+          if (!db) {
+            console.warn("Firestore not ready yet");
+            return;
+          }
+          try {
+            const snapshot = await db
+              .collection("confessions")
+              .orderBy("createdAt", "desc")
+              .limit(50)
+              .get();
+
+            this.confessions = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                content: data.content || "",
+                likes: data.likes || 0,
+                comments: data.comments || 0,
+                time: data.time || "just now"
+              };
+            });
+          } catch (e) {
+            console.error("Error loading confessions", e);
+          }
+        },
+
+        // Post a new confession
+        async submitConfession() {
+          if (!this.newConfessionText || !this.newConfessionText.trim()) {
+            return;
+          }
+          if (!db) {
+            alert("Database not ready yet.");
+            return;
+          }
+          if (!this.currentUser) {
+            alert("Please login with Google to post.");
+            return;
+          }
+
+          const text = this.newConfessionText.trim();
+
+          try {
+            await db.collection("confessions").add({
+              content: text,
+              likes: 0,
+              comments: 0,
+              time: "just now",
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              authorId: this.currentUser.uid
+            });
+            this.newConfessionText = "";
+            await this.loadConfessions();
+          } catch (e) {
+            console.error("Error sending confession", e);
+            alert("Error sending confession: " + e.message);
+          }
+        },
+
+        // Like button (local only – not saved in Firestore yet)
+        toggleConfessionLike(id) {
+          const c = this.confessions.find(x => x.id === id);
+          if (!c) return;
+          c.isLiked = !c.isLiked;
+          c.likes += c.isLiked ? 1 : -1;
+        }
+      };
+    }
+  </script>
+</head>
+<body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
+
+  <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden"
+       x-data="app()"
+       x-init="initFirebase(); initAuthListener(); loadConfessions()">
+
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-purple-600 via-purple-500 to-fuchsia-500 px-5 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center">
+          <i class="fas fa-user-secret text-white text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-white">CampusConfess</h1>
+          <p class="text-[11px] text-white/80">Anonymous confessions • College only</p>
+        </div>
+      </div>
+
+      <div>
+        <!-- If not logged in -->
+        <button
+          x-show="!currentUser"
+          @click="loginWithGoogle()"
+          class="px-3 py-1.5 rounded-full bg-white text-purple-600 text-[11px] font-semibold shadow-sm">
+          Login with Google
+        </button>
+
+        <!-- If logged in -->
+        <div x-show="currentUser" class="flex items-center gap-2">
+          <span class="text-[11px] text-white/80 hidden sm:inline" x-text="currentUser?.name || 'Student'"></span>
+          <button
+            @click="logout()"
+            class="px-3 py-1.5 rounded-full bg-white/20 text-white text-[11px] font-semibold border border-white/40">
+            Logout
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Write new confession -->
+    <div class="px-5 pt-4 pb-3 bg-white border-b border-slate-100">
+      <div class="bg-slate-50 rounded-2xl p-3 border border-slate-200">
+        <textarea
+          x-model="newConfessionText"
+          rows="3"
+          class="w-full text-sm text-slate-800 bg-transparent resize-none focus:outline-none"
+          placeholder="Write your confession anonymously..."></textarea>
+        <div class="mt-2 flex items-center justify-between">
+          <p class="text-[11px] text-slate-500">
+            <span x-show="!currentUser">Login to post with your student account.</span>
+            <span x-show="currentUser" x-text="'Posting as ' + (currentUser.name || 'Student')"></span>
+          </p>
+          <button
+            @click="submitConfession()"
+            class="px-4 py-1.5 rounded-full bg-gradient-to-r from-purple-600 to-fuchsia-500 text-white text-[11px] font-semibold shadow">
+            Post Anonymously
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confessions list -->
+    <div class="px-5 pt-3 pb-5 bg-slate-50 max-h-[450px] overflow-y-auto">
+      <template x-if="confessions.length === 0">
+        <p class="text-[12px] text-slate-500 text-center mt-6">
+          No confessions yet. Be the first to post 🙈
+        </p>
+      </template>
+
+      <template x-for="confession in confessions" :key="confession.id">
+        <div class="bg-white rounded-3xl shadow-sm mb-3 p-4 border border-slate-100">
+          <div class="flex items-start gap-3 mb-2">
+            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center">
+              <i class="fas fa-user-secret text-white text-sm"></i>
+            </div>
+            <div class="flex-1">
+              <div class="flex justify-between items-center mb-1">
+                <span class="text-[12px] font-semibold text-slate-800">Anonymous</span>
+                <span class="text-[10px] text-slate-400" x-text="confession.time"></span>
+              </div>
+              <p class="text-[13px] text-slate-800 leading-relaxed" x-text="confession.content"></p>
+            </div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-500 mt-1">
+            <button
+              @click="toggleConfessionLike(confession.id)"
+              class="flex items-center gap-1"
+              :class="confession.isLiked ? 'text-purple-600' : ''">
+              <i class="fas fa-heart text-xs"></i>
+              <span x-text="confession.likes + ' hearts'"></span>
+            </button>
+            <span x-text="confession.comments + ' comments'"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+</body>
+</html>
